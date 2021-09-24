@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 import multiprocessing
+import os
+import hcp_utils as hcp
 
 # create annealing iteration object
 class anneal_iter:
@@ -16,10 +18,15 @@ class anneal_iter:
           self.iit_complex = iit_complex
 
 def bigphi_calc(P_part, percentile_thr):
-    """Form a complex number.
+    """Approximation of 'big phi' 
 
-    Keyword arguments:
-    P_part - Part of the probability matrix that is being investigated
+     Args:
+        P_part (np.ndarray): A partition of the full probability matrix (P_full) from the vertice covariance matrix
+        percentile_thr (float): The percentile (0.001 corresponds to top 1/1000th) in identifying the "cut" (this controls for extreme outlier correlations)
+
+    Returns:
+        Bphi (float): big phi
+        Pmin_max (float): The minimum "cut", correspoding to the minimum probability among vertices (of maximum correlations identified for each vertice)
     """
 
     # sort vertices (here columns) by maximum correlations (i.e., maximum correlation for each vertice)
@@ -34,7 +41,7 @@ def bigphi_calc(P_part, percentile_thr):
     minind = np.where(Pi_max == Pi_max.min())[0]
 
     # create Prob_i matrix without MIP node
-    Pi_ex = Pi_max
+    Pi_ex = Pi_max.copy()
     Pi_ex = np.delete(Pi_ex, minind, 0)
 
     # calclate big phi and append to list
@@ -43,21 +50,23 @@ def bigphi_calc(P_part, percentile_thr):
     return Bphi, Pmin_max
 
 
-def create_initial_prior(parcel_granularity_iter, parcel_granularity, P_full):
-    """Runs annealing for the first granularity (1)
+def initialize_annealing(parcel_granularity_iter, P_full):
+    """Runs initial prior esitmation based on combinations of random parcellations
 
-    Keyword arguments:
-    parcel_granularity_iter -- the specific iteration (out of 40) that corresponds to a specific parcellation file
-    parcel_granularity -- the number of ROIS in parcellation file [1:8] corresponds to 10, 20, 40, 80, 160, 320, 640, 1280
-    P_full -- probability matrix from neuroimaging data
-    annealing_iterations -- iterations of simulated annealing
-    min_prob -- minimum probability for the probability of parcels based on v_prior
+     Args:
+        parcel_granularity_iter (int): The ID (1-40) of a given parcellation granularity
+        P_full (np.ndarray): The full probability matrix, derived from the covariance matrix of vertices
+
+    Returns:
+        (list[anneal_iter]): List of anneal_iter objects, each list item corresponds to one parcellation ID/annealing run
     """
     
-    parcel = scipy.io.loadmat('parcellations/files/parcellation/parcellation_ID' + str(parcel_granularity_iter) +\
-                              '_062519_Iter' + str(parcel_granularity) + '_7T.mat')
-    print('loading... parcellations/files/parcellation/parcellation_ID' + str(parcel_granularity_iter) +\
-                              '_062519_Iter' + str(parcel_granularity) + '_7T.mat')
+    this_dir, this_filename = os.path.split(__file__)
+    parcel = scipy.io.loadmat(os.path.join(this_dir, "parcellations/files", 
+                'parcellation_ID' + str(parcel_granularity_iter) + '_062519_Iter1_7T.mat'))
+                        
+    print(os.path.join(this_dir, "parcellations/files", 
+                'parcellation_ID' + str(parcel_granularity_iter) + '_062519_Iter1_7T.mat'))
     
     # resampled parcel
     BPo = parcel['brain_parcel']
@@ -86,7 +95,7 @@ def create_initial_prior(parcel_granularity_iter, parcel_granularity, P_full):
     # plt.show()
 
     # reorder indicies of probability matrix so that l/h are adjacent
-    P_full_ordered  = P_full[order_vec.astype(int),:]
+    P_full_ordered  = P_full[order_vec.astype(int),:].copy()
     P_full_ordered  = P_full_ordered[:,order_vec.astype(int)]
 
     # create parcel combination set 2^# parcels
@@ -98,7 +107,7 @@ def create_initial_prior(parcel_granularity_iter, parcel_granularity, P_full):
     # skip last iteration [all zeros]
     for t in range(0,2**NP-1):
 
-        print("parcel iteration ID: " + str(parcel_granularity_iter) + ", iter: " + str(t) + "/" + str(2**NP))
+        print("parcellation iteration ID: " + str(parcel_granularity_iter) + ", iter: " + str(t) + "/" + str(2**NP))
         input_set = np.zeros(D)
 
         # parcel combination at iteration t, account for 0-based index
@@ -121,14 +130,13 @@ def create_initial_prior(parcel_granularity_iter, parcel_granularity, P_full):
         Pmin_max_hist.append(Pmin_max_calc)
         
     Bphi_max = np.array(Bphi).max()
-    print(Bphi)
     iit_complex = lst[np.where(np.array(Bphi) == Bphi_max)[0][0]]
         
     ai = anneal_iter(parcel_granularity_iter,Bphi,lst,Pmin_max_hist,iit_complex)
     
     return ai
 
-def multi_thread_create_initial_prior(threads, parcel_granularity, P_full):
+def multi_thread_initialize_annealing(threads, P_full):
     """Creates initial prior by running each parcel image (1-40) on a separate thread
 
     Keyword arguments:
@@ -137,43 +145,48 @@ def multi_thread_create_initial_prior(threads, parcel_granularity, P_full):
     P_full -- probability matrix from neuroimaging data
     annealing_iterations -- iterations of simulated annealing
     min_prob -- minimum probability for the probability of parcels based on v_prior
+
+    The return type is a list of anneal_iter classes, each list item corresponds to one parcellation ID/annealing
     """
     mp_input = []
     for i in range(1,threads+1):
-        mp_input.append((i,parcel_granularity,P_full))
+        mp_input.append((i,P_full))
 
     pool_obj = multiprocessing.Pool()
-    answer = pool_obj.starmap(create_initial_prior, mp_input)
+    answer = pool_obj.starmap(initialize_annealing, mp_input)
     pool_obj.close()
 
     return answer
 
 
-def run_annealing_wprior(parcel_granularity_iter, parcel_granularity, P_full, annealing_iterations, min_prob, last_run):
+def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granularity, P_full, annealing_iterations, min_prob, last_run=False):
     """Runs annealing for the 2-8 granularities, and loads prior from previous iteration
 
     Keyword arguments:
-    parcel_granularity_iter -- the specific iteration (out of 40) that corresponds to a specific parcellation file
+    prior_dir -- string with directory name of prior
+    subid -- string with ID of specific file
+    parcel_granularity_iter -- the specific iteration ID (out of 40) that corresponds to a specific parcellation file of a given granularity
     parcel_granularity -- the number of ROIS in parcellation file [1:8] corresponds to 10, 20, 40, 80, 160, 320, 640, 1280
     P_full -- probability matrix from neuroimaging data
     annealing_iterations -- iterations of simulated annealing
     min_prob -- minimum probability for the probability of parcels based on v_prior
     """
 
-    parcel = scipy.io.loadmat('parcellations/files/parcellation/parcellation_ID' + str(parcel_granularity_iter) +\
-                                '_062519_Iter' + str(parcel_granularity) + '_7T.mat')
+    this_dir, this_filename = os.path.split(__file__)
+    parcel = scipy.io.loadmat(os.path.join(this_dir, "parcellations/files", 
+                'parcellation_ID' + str(parcel_granularity_iter) + '_062519_Iter' + str(parcel_granularity) + '_7T.mat'))
                         
-    print('loading... parcellations/files/parcellation/parcellation_ID' + str(parcel_granularity_iter) +\
-                            '_062519_Iter' + str(parcel_granularity) + '_7T.mat')
+    print(os.path.join(this_dir, "parcellations/files", 
+                'parcellation_ID' + str(parcel_granularity_iter) + '_062519_Iter' + str(parcel_granularity) + '_7T.mat'))
 
     if last_run:
-        v_prior = np.load('/data/tvanasse/elephant_data/priors/SA_random_prior_Iter' + str(parcel_granularity) +\
-            '_100610.npy')
-        init_size = np.load('/data/tvanasse/elephant_data/priors/SA_random_prior_Iter' + str(parcel_granularity) +\
-            '_medianvertices_100610.npy')
+        v_prior = np.load(prior_dir + '/SA_random_prior_Iter' + str(parcel_granularity) +\
+            '_' + subid + '.npy')
+        init_size = np.load(prior_dir + '/SA_random_prior_Iter' + str(parcel_granularity) +\
+            '_medianvertices_' + subid + '.npy')
     else:
-        v_prior = np.load('/data/tvanasse/elephant_data/priors/SA_random_prior_Iter' + str(parcel_granularity - 1) +\
-            '_100610.npy')
+        v_prior = np.load(prior_dir + '/SA_random_prior_Iter' + str(parcel_granularity - 1) +\
+            '_' + subid + '.npy')
 
     # resampled parcel
     BPo = parcel['brain_parcel']
@@ -253,10 +266,10 @@ def run_annealing_wprior(parcel_granularity_iter, parcel_granularity, P_full, an
         init_set[P_prior.argsort()[-int(init_size):][::-1]] = 1
         input_set = init_set;   
 
-    print("initialized complex size (==1) based on prior: " + str(len(np.nonzero(init_set)[0])))
+    print("initialized complex size (ROIS) based on prior: " + str(len(np.nonzero(init_set)[0])))
     ROI_ID = np.nonzero(input_set)[0]
 
-    P_part  = P_full_ordered[ROI_ID,:]
+    P_part  = P_full_ordered[ROI_ID,:].copy()
     P_part = P_part[:,ROI_ID]
 
     # calculate big phi
@@ -277,8 +290,7 @@ def run_annealing_wprior(parcel_granularity_iter, parcel_granularity, P_full, an
     for t in range(1,annealing_iterations):
 
         if t % 100 == 0:
-            print("granularity: " + str(parcel_granularity) + ", temperature: " + str(T) + ", iteration t: " + str(t) + ", parcel_iter: " +\
-                str(parcel_granularity_iter))
+            print("granularity: " + str(parcel_granularity) + ", temperature: " + str(round(T, 2)) + ", annealing iter: " + str(t) + "/" + str(annealing_iterations) + ", parcellation iter ID: " + str(parcel_granularity_iter))
 
         # run Monte Carlo simulation: each iteration identifies parcels that are more likely (based on prior)
         # to be in complex are flipped 
@@ -312,7 +324,7 @@ def run_annealing_wprior(parcel_granularity_iter, parcel_granularity, P_full, an
 
         ROI_ID = np.nonzero(input_set)[0]
 
-        P_part  = P_full_ordered[ROI_ID,:]
+        P_part  = P_full_ordered[ROI_ID,:].copy()
         P_part = P_part[:,ROI_ID]
 
         Bphi, Pmin_maxcalc = bigphi_calc(P_part, 0.001)
@@ -337,14 +349,13 @@ def run_annealing_wprior(parcel_granularity_iter, parcel_granularity, P_full, an
         T = T*TFACTOR
 
     Bphi_max = np.array(Bphi_hist).max()
-    print(Bphi_max)
     iit_complex = set_hist[np.where(np.array(Bphi_hist) == Bphi_max)[0][0]]
 
     ai = anneal_iter(parcel_granularity_iter,Bphi_hist,set_hist,Pmin_max_hist,iit_complex)
 
     return ai
 
-def create_prior(iter_list,parcel_granularity,SUBID):
+def create_prior(iter_list,parcel_granularity,SUBID,output_folder):
     """Based on SA output, creates prior for next iteration 
     """
 
@@ -353,10 +364,11 @@ def create_prior(iter_list,parcel_granularity,SUBID):
 
     # go through all iterations
     for i in range(0,len(iter_list)):
-        
-        parcel = scipy.io.loadmat('parcellations/files/parcellation/parcellation_ID' + str(i+1) +\
-                                '_062519_Iter' + str(parcel_granularity) + '_7T.mat')
-        
+
+        this_dir, this_filename = os.path.split(__file__)
+        parcel = scipy.io.loadmat(os.path.join(this_dir, "parcellations/files/parcellation_ID" +\
+                            str(i+1) + '_062519_Iter' + str(parcel_granularity) + '_7T.mat'))
+              
         # resampled parcel
         BPo = parcel['brain_parcel']
         
@@ -405,16 +417,13 @@ def create_prior(iter_list,parcel_granularity,SUBID):
 
         # parcel granularities 2-8, only add top complex
         else:
-            print(i)
             in_complex = iter_list[i].iit_complex
             in_complex = np.array(list(map(int, in_complex)))
             in_complex = np.where(in_complex == 1)[0]+1
-            print(in_complex)
         
             # find where the parcels match the complex (returns multi-dimensional array)
             overlap = brain_parcel == in_complex 
             overlap = np.sum(overlap,axis=1)
-            print(overlap.shape)
             
             vscore_all.append(overlap)
 
@@ -433,24 +442,24 @@ def create_prior(iter_list,parcel_granularity,SUBID):
         
         plt.plot(iter_list[ii].Bphi,linewidth=0.2)
 
-    plt.savefig('/data/tvanasse/elephant_data/priors/SA_random_prior_Iter' + str(parcel_granularity) + \
+    plt.savefig(output_folder + '/SA_random_prior_Iter' + str(parcel_granularity) + \
             '_' + SUBID + '_bphidist.png')
     plt.show()
 
-    np.save('/data/tvanasse/elephant_data/priors/SA_random_prior_Iter' + str(parcel_granularity) + \
+    np.save(output_folder + '/SA_random_prior_Iter' + str(parcel_granularity) + \
             '_' + SUBID, np.mean(np.array(vscore_all),axis=0))
-    np.save('/data/tvanasse/elephant_data/priors/SA_random_prior_Iter' + str(parcel_granularity) + \
+    np.save(output_folder + '/SA_random_prior_Iter' + str(parcel_granularity) + \
             '_medianvertices_' + SUBID, median_all)
 
 
-def multi_thread_run_annealing_wprior(threads, parcel_granularity, P_full, annealing_iterations,min_prob,last_run):
+def multi_thread_run_annealing_wprior(threads, prior_dir, subid, parcel_granularity, P_full, annealing_iterations,min_prob,last_run=False):
     """Runs annealing and creates a separate thread for each parcel_granularity_iter
 
     threads -- each thread corresponds to a parcel_granularity_iteration (40)
     """
     mp_input = []
     for i in range(1,threads+1):
-        mp_input.append((i,parcel_granularity,P_full,annealing_iterations,min_prob,last_run))
+        mp_input.append((i, prior_dir, subid, parcel_granularity, P_full,annealing_iterations,min_prob, last_run))
 
     pool_obj = multiprocessing.Pool()
     answer = pool_obj.starmap(run_annealing_wprior, mp_input)
