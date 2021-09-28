@@ -1,6 +1,8 @@
 import numpy as np
 import hcp_utils as hcp
+import os
 from sklearn.covariance import OAS
+import scipy
 
 def resample(intersect_vert,Xn):
     # import numpy as np
@@ -67,5 +69,22 @@ def get_prob_matrix(Xall):
 
     return np.maximum(P1_vals,P0_vals), cor_mat
 
+def get_full_lr_texture(vscore_all):
+
+    this_dir, this_filename = os.path.split(__file__)
+    mat = scipy.io.loadmat(os.path.join(this_dir, "parcellations/resampled_cortex_ID_3_4mm.mat"))
+
+    # intersecting vertices across left and right hemispheres, 0-based index?
+    intersect_resample = (
+        np.intersect1d(mat["resample_hemi"][0][0][0], mat["resample_hemi"][1][0][0]) - 1
+    )
+
+    lf = np.zeros(32492)
+    rf = np.zeros(32492)
+
+    lf[intersect_resample] = vscore_all[0 : len(intersect_resample)]
+    rf[intersect_resample] = vscore_all[len(intersect_resample) :]
+
+    return lf, rf
 
 

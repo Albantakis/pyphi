@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 import scipy
 import multiprocessing
 import os
+import time
 import hcp_utils as hcp
+import pickle
 
 # create annealing iteration object
 class anneal_iter:
@@ -74,6 +76,7 @@ def initialize_annealing(parcel_granularity_iter, P_full):
     # max # of parcels
     NPm = np.max(np.unique(BPo))
     
+    # create symmetric parcellation across hemispheres
     brain_parcel = np.concatenate((BPo,BPo+NPm)).flatten().astype(np.int)
     # plt.plot(brain_parcel)
     # plt.show()
@@ -203,6 +206,7 @@ def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granu
     # check if brain_parcel includes zero, and shift if it does
     if np.size(np.nonzero(np.unique(brain_parcel) == 0)) > 0:
         brain_parcel = brain_parcel + 1
+
     # D is number of vertices
     D = len(brain_parcel)
     NP = len(np.unique(brain_parcel))
@@ -212,13 +216,11 @@ def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granu
     order_vec[np.arange(0,int(D)-1,2)] = np.arange(0,int(D/2))
     order_vec[np.arange(1,D,2)]   = np.arange(D/2,D)
 
-    # reorder indicies of brain_parcel so that l/h are adjacent
+    # order indicies of brain_parcel so that l/h are adjacent
     brain_parcel = brain_parcel[order_vec.astype(int)]
     v_prior = v_prior[order_vec.astype(int)]
-    # plt.plot(brain_parcel)
-    # plt.show()
 
-    print("brain parcel length: " + str(NP))
+    print("specific granularity: " + str(NP))
 
     if not last_run:
         # set P_prior to mean of ROIs in new parcel
@@ -226,24 +228,26 @@ def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granu
         for i in range(1,NP+1):
             P_prior[i-1] = np.mean(v_prior[brain_parcel == i])
     else:
-        P_prior = v_prior
+        P_prior = v_prior.copy()
 
 
     # edge cases (P_prior == 1) everywhere
     if len(P_prior[P_prior == 1]) == len(P_prior):
+        print("where > 0.95" + str(np.where(P_prior == 1)[0]))
         P_prior[:] = 0.95
 
     if (min_prob > 0) and (len(P_prior[P_prior == 0]) > 0):
         # edge cases (P_prior == 0)
+        print("EDGE CASE, MIN_PROB")
         P_prior[P_prior == 0] = min_prob
 
-    # reorder indicies of probability matrix so that l/h are adjacent
+    # order indicies of probability matrix so that l/h are adjacent
     P_full_ordered  = P_full[order_vec.astype(int),:]
     P_full_ordered  = P_full_ordered[:,order_vec.astype(int)]
 
     # vertice threshold, find where v_prior vertices are greater than median.
     p_threshold = 0.5;  
-    sort_index = np.argsort(v_prior)[::-1]
+    sort_index = np.argsort(v_prior)[::-1] #descending order
     V_threshold = np.zeros(D)
     V_threshold[sort_index[0:int(np.round(p_threshold*D))]] = 1
 
@@ -264,7 +268,7 @@ def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granu
         # find the top N=init_size vertices where v_prior is highest, 
         # init_size is median size of v_prior complexes
         init_set[P_prior.argsort()[-int(init_size):][::-1]] = 1
-        input_set = init_set;   
+        input_set = init_set.copy();   
 
     print("initialized complex size (ROIS) based on prior: " + str(len(np.nonzero(init_set)[0])))
     ROI_ID = np.nonzero(input_set)[0]
@@ -289,38 +293,40 @@ def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granu
 
     for t in range(1,annealing_iterations):
 
+        startTime = time.time()
+
         if t % 100 == 0:
-            print("granularity: " + str(parcel_granularity) + ", temperature: " + str(round(T, 2)) + ", annealing iter: " + str(t) + "/" + str(annealing_iterations) + ", parcellation iter ID: " + str(parcel_granularity_iter))
+            print("granularity: " + str(parcel_granularity) + ", parcellation iter ID: " + str(parcel_granularity_iter) + ", annealing iter: " + str(t) + "/" + str(annealing_iterations) + ", temperature: " + str(round(T, 2)))
 
         # run Monte Carlo simulation: each iteration identifies parcels that are more likely (based on prior)
         # to be in complex are flipped 
         A_prior = np.round(100*np.abs(init_set-P_prior))
-        P_length = np.sum(A_prior)
+        # plt.plot(A_prior)
+        # plt.show()
 
-        # create sampling array, rand_vec. Number of indices is based on the prior probability for that parcel.
-        rand_vec = []
-        for P_label in range(0,NP):
-            if A_prior[P_label] != 0:
-                rand_vec = np.concatenate((rand_vec,(P_label+1)*np.ones(int(A_prior[P_label]))))
-                
-        # flip random element in set based on monte carlo simulation
-        rand_el = int(np.random.choice(rand_vec))
+        rand_ind = np.random.choice(np.arange(0,NP), 1, p = A_prior/np.sum(A_prior))
+
         new_set = init_set.copy() ## IMPORTANT to COPY!
-        if new_set[rand_el-1]:
-            new_set[rand_el-1] = 0
+        # print(rand_ind)
+        if new_set[rand_ind]:
+            new_set[rand_ind] = 0
         else:
-            new_set[rand_el-1] = 1
+            new_set[rand_ind] = 1
             
         # check if new_set is entirely zeros, and correct if so
         if np.nonzero(new_set)[0].size == 0:
-            rand_el = int(np.random.choice(rand_vec))
-            new_set[rand_el-1] = 1
+            rand_ind = np.random.choice(np.arange(0,NP), 1, p = A_prior/np.sum(A_prior))
+            new_set[rand_ind] = 1
             
         # calculate big_phi
-        input_set = np.zeros(D)
-        on_list = np.nonzero(new_set)[0] + 1
-        for ii in range(0,len(on_list)):
-            input_set[brain_parcel==on_list[ii]] = 1
+        if not last_run:
+            input_set = np.zeros(D)
+            on_list = np.nonzero(new_set)[0] + 1
+            for ii in range(0,len(on_list)):
+                input_set[brain_parcel==on_list[ii]] = 1
+        else:
+            input_set = np.zeros(D)
+            input_set[np.nonzero(new_set)[0]] = 1
 
         ROI_ID = np.nonzero(input_set)[0]
 
@@ -331,27 +337,44 @@ def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granu
 
         Pmin_max_hist.append(Pmin_maxcalc)
 
+        # annealing process
         if Bphi > Bphi_hist[t-1]:
             Bphi_hist.append(Bphi)
-            init_set = new_set
+            init_set = new_set.copy()
         else:
             delta = Bphi_hist[t-1] - Bphi
             # transition probability
             trans_p = 1/(1 + np.exp(delta/T))
             if np.random.uniform(0, 1) < trans_p:
-                init_set = new_set
+                init_set = new_set.copy()
                 Bphi_hist.append(Bphi)
             else:
                 Bphi_hist.append(Bphi_hist[t-1])
                 
         set_hist.append(init_set)
+        # print("Bphi_hist: " + str(Bphi_hist))
 
         T = T*TFACTOR
+
+        executionTime = (time.time() - startTime)
+        # print('Execution time in seconds: ' + str(executionTime))
 
     Bphi_max = np.array(Bphi_hist).max()
     iit_complex = set_hist[np.where(np.array(Bphi_hist) == Bphi_max)[0][0]]
 
+    if last_run:
+        # reorder indices, so lh/rh aren't neighboring
+        order_inv = np.zeros(D)
+        order_inv[np.arange(0, int(D / 2))] = np.arange(0, int(D) - 1, 2)
+        order_inv[np.arange(int(D / 2), D)] = np.arange(1, int(D), 2)
+
+        iit_complex = set_hist[np.where(np.array(Bphi_hist) == Bphi_max)[0][0]][order_inv.astype(int)]
+
     ai = anneal_iter(parcel_granularity_iter,Bphi_hist,set_hist,Pmin_max_hist,iit_complex)
+
+    if last_run:
+        with open(prior_dir + subid + "_voxelwise_annealing_output.pkl","wb") as f:
+            pickle.dump(ai, f)
 
     return ai
 
@@ -426,7 +449,6 @@ def create_prior(iter_list,parcel_granularity,SUBID,output_folder):
             overlap = np.sum(overlap,axis=1)
             
             vscore_all.append(overlap)
-
 
     # median vertices across complexes
     median_all = np.round(np.median(np.sum(np.array(vscore_all),axis=1)))
