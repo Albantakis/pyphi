@@ -140,17 +140,15 @@ def initialize_annealing(parcel_granularity_iter, P_full):
     return ai
 
 def multi_thread_initialize_annealing(threads, P_full):
-    """Creates initial prior by running each parcel image (1-40) on a separate thread
+    """Initializes annealing with multipel threads 
 
-    Keyword arguments:
-    parcel_granularity_iter -- the specific iteration (out of 40) that corresponds to a specific parcellation file
-    parcel_granularity -- the number of ROIS in parcellation file [1:8] corresponds to 10, 20, 40, 80, 160, 320, 640, 1280
-    P_full -- probability matrix from neuroimaging data
-    annealing_iterations -- iterations of simulated annealing
-    min_prob -- minimum probability for the probability of parcels based on v_prior
-
-    The return type is a list of anneal_iter classes, each list item corresponds to one parcellation ID/annealing
+     Args:
+        P_pull (np.ndarray): Thefull probability matrix (P_full) from the vertice covariance matrix
+  
+    Returns:
+        answer (list[anneal_iter]): list of annealing iterations
     """
+
     mp_input = []
     for i in range(1,threads+1):
         mp_input.append((i,P_full))
@@ -163,16 +161,20 @@ def multi_thread_initialize_annealing(threads, P_full):
 
 
 def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granularity, P_full, annealing_iterations, min_prob, last_run=False):
-    """Runs annealing for the 2-8 granularities, and loads prior from previous iteration
+    """Runs simulated annealing according to specific granularity iteration (2-8). It utilized the output from the prior step, 
+    as a basis for monte carlo simulations to identify the optimal combinatorial solution for the IIT complex
 
     Keyword arguments:
-    prior_dir -- string with directory name of prior
-    subid -- string with ID of specific file
-    parcel_granularity_iter -- the specific iteration ID (out of 40) that corresponds to a specific parcellation file of a given granularity
+        parcel_granularity_iter (int): the specific iteration ID (out of 40) that corresponds to a specific parcellation file of a given granularity
+        prior_dir (str): string with directory name of prior
+        subid (str): name of subject id
+        min_prob (float): minimum probability for the probability of parcels based on v_prior
+        P_full (np.ndarray): string with directory name of prior
+    
     parcel_granularity -- the number of ROIS in parcellation file [1:8] corresponds to 10, 20, 40, 80, 160, 320, 640, 1280
     P_full -- probability matrix from neuroimaging data
     annealing_iterations -- iterations of simulated annealing
-    min_prob -- minimum probability for the probability of parcels based on v_prior
+    
     """
 
     this_dir, this_filename = os.path.split(__file__)
@@ -379,7 +381,14 @@ def run_annealing_wprior(parcel_granularity_iter, prior_dir, subid, parcel_granu
     return ai
 
 def create_prior(iter_list,parcel_granularity,SUBID,output_folder):
-    """Based on SA output, creates prior for next iteration 
+    """Creates prior from iterations of granularities (1-40). 
+
+    Keyword arguments:
+        iter_list (list[anneal_iter]): list of annealing iterations
+        parcel_granularity_iter (int): the specific iteration ID (out of 40) that corresponds to a specific parcellation file of a given granularity
+        subid (str): name of subject id
+        output_folder (str): str with directory where to save prior
+    
     """
 
     big_phi_combinations = []
@@ -466,7 +475,7 @@ def create_prior(iter_list,parcel_granularity,SUBID,output_folder):
 
     plt.savefig(output_folder + '/SA_random_prior_Iter' + str(parcel_granularity) + \
             '_' + SUBID + '_bphidist.png')
-    plt.show()
+    # plt.show()
 
     np.save(output_folder + '/SA_random_prior_Iter' + str(parcel_granularity) + \
             '_' + SUBID, np.mean(np.array(vscore_all),axis=0))
