@@ -4,15 +4,21 @@ import os
 from sklearn.covariance import OAS
 import scipy
 
-def resample(intersect_vert,Xn):
-    # import numpy as np
-    # import hcp_utils as hcp
-
+def resample(Xn):
     #  HCP fMRI data are defined on a subset of the surface vertices (29696 out of 32492 for the left 
     # cortex and 29716 out of 32492 for the right cortex). Hence we have to construct an 
     # auxilliary array of size 32492 or 64984 with the fMRI data points inserted in appropriate places 
     # and a constant (zero by default) elsewhere. This is achieved by the cortex_data(arr, fill=0), 
     # left_cortex_data(arr, fill=0) and right_cortex_data(arr, fill=0)
+    
+    this_dir, this_filename = os.path.split(__file__)
+    mat = scipy.io.loadmat(os.path.join(this_dir, "parcellations/resampled_cortex_ID_3_4mm.mat"))
+
+    # intersecting vertices across left and right hemispheres, 0-based index?
+    intersect_vert = (
+        np.intersect1d(mat["resample_hemi"][0][0][0], mat["resample_hemi"][1][0][0]) - 1
+    )
+    
     first_iter = 1
     for i in range(0,Xn.shape[0]):
         if first_iter:
