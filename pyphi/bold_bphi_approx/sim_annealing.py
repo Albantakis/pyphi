@@ -87,7 +87,7 @@ def initialize_annealing(parcel_granularity_iter, P_full):
     D = len(brain_parcel)
     NP = len(np.unique(brain_parcel))
 
-    # %% changing the order of ROI labels
+    # changing the order of ROI labels
     order_vec            = np.zeros(D)
     order_vec[np.arange(0,int(D)-1,2)] = np.arange(0,int(D/2))
     order_vec[np.arange(1,D,2)]   = np.arange(D/2,D)
@@ -476,6 +476,7 @@ def create_prior(iter_list,parcel_granularity,SUBID,output_folder):
     plt.savefig(output_folder + '/SA_random_prior_Iter' + str(parcel_granularity) + \
             '_' + SUBID + '_bphidist.png')
     # plt.show()
+    plt.close() # close so plots don't overlay
 
     np.save(output_folder + '/SA_random_prior_Iter' + str(parcel_granularity) + \
             '_' + SUBID, np.mean(np.array(vscore_all),axis=0))
