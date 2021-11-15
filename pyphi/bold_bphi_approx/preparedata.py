@@ -67,6 +67,7 @@ def get_prob_matrix(Xall):
         return 2*((1/4)-(1/(2*np.pi))*np.arcsin(x))
 
     # diagonals are 1, so we zero them out here
+    # LA: Might be faster to just do the absolute value of the correlation coefficients? And have only P1
     P1_vals = P1(cor_mat)
     np.fill_diagonal(P1_vals,0)
 

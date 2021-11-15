@@ -35,6 +35,8 @@ def bigphi_calc(P_part, percentile_thr):
     P_sort = np.sort(P_part,1)[:,::-1]
 
     # control for outliers by getting 0.001 percentile 
+    # LA: effectively select 0.001*#vertices column
+    # LA: This can already make a significant difference in the correlation, maybe discuss
     # Pi_max = P_sort[:,(P_sort.shape[0]-1) - np.int(np.ceil(percentile_thr*P_sort.shape[0]))]
     Pi_max = P_sort[:,np.int(np.ceil(percentile_thr*P_sort.shape[0])) - 1]
 
@@ -50,6 +52,26 @@ def bigphi_calc(P_part, percentile_thr):
     Bphi = np.sum(np.log10(Pi_max)) + np.log10(Pmin_max) + np.sum(np.log10(1 + Pi_ex))
 
     return Bphi, Pmin_max
+
+
+def load_granularity(parcel_granularity_iter):
+    """Loads a parcellation
+
+     Args:
+        parcel_granularity_iter (int): The ID (1-40) of a given parcellation granularity
+
+    Returns:
+        parcellation
+    """
+    
+    this_dir, this_filename = os.path.split(__file__)
+    parcel = scipy.io.loadmat(os.path.join(this_dir, "parcellations/files", 
+                'parcellation_ID' + str(parcel_granularity_iter) + '_062519_Iter1_7T.mat'))
+                        
+    print(os.path.join(this_dir, "parcellations/files", 
+                'parcellation_ID' + str(parcel_granularity_iter) + '_062519_Iter1_7T.mat'))
+    
+    return parcel
 
 
 def initialize_annealing(parcel_granularity_iter, P_full):
@@ -78,8 +100,8 @@ def initialize_annealing(parcel_granularity_iter, P_full):
     
     # create symmetric parcellation across hemispheres
     brain_parcel = np.concatenate((BPo,BPo+NPm)).flatten().astype(np.int)
-    # plt.plot(brain_parcel)
-    # plt.show()
+    #plt.plot(brain_parcel)
+    plt.show()
 
     # check if brain_parcel includes zero, and shift if it does
     if np.size(np.nonzero(np.unique(brain_parcel) == 0)) > 0:
