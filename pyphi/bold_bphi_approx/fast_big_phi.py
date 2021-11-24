@@ -8,7 +8,7 @@ from math import inf
 # ---------------------------------------------------------------------------------
 # Big Phi functions
 # ---------------------------------------------------------------------------------
-def Big_Phi_Oizumi(Pi_max):
+def Big_Phi_Sasai(Pi_max):
     Pmin_max = Pi_max[-1]
     Pi_ex = Pi_max[0:-1]
     Bphi = np.sum(np.log10(Pi_max)) + np.log10(Pmin_max) + np.sum(np.log10(1 + Pi_ex))
@@ -100,7 +100,7 @@ def fast_agglomeration_str(P_cor):
     ind_last = np.zeros(N, dtype=int)
     # sum total correlation
     sum_total_r = np.sum(P_cor,1)
-    print(np.max(sum_total_r))
+    #print(np.max(sum_total_r))
     # get voxel with highest sum correlation
     maxind = np.argmax(sum_total_r)
     ind_last[0] = maxind
