@@ -1,6 +1,9 @@
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+
 from ..utils import all_states
+from ..network import Network
+from ..subsystem import Subsystem
 
 def binarize_signal(signal):
     # signal: time x voxels
@@ -28,6 +31,8 @@ def list_observed_states(B_signal, M):
     state_list = np.zeros(t_steps)
     for ss in range(size_m):
         state_list = state_list + M_signal[:,ss]*(2**ss)
+
+    state_list = state_list.astype(int)
     
     return state_list
 
@@ -53,7 +58,7 @@ def logit_cause_tpm(B_signal, P_cor, M, size_c):
     else:
         print('P > M not implemented yet')
 
-    all_states = [a for a in pyphi.utils.all_states(size_c)]
+    list_all_states = [s for s in all_states(size_c)]
 
     #logistic regression
     tpm_p_m = []
@@ -61,6 +66,30 @@ def logit_cause_tpm(B_signal, P_cor, M, size_c):
         lr = LogisticRegression()
         lr.fit(B_signal[:,purview], B_signal[:,m_node])
         # get probabilities for m_node to be on for all possible states of purview
-        tpm_p_m.append(lr.predict_proba(all_states)[:,1])
+        tpm_p_m.append(lr.predict_proba(list_all_states)[:,1])
 
     return np.transpose(tpm_p_m)
+
+def small_phi_cause(tpm, states, state_counts = 1):
+    # compute cause small phi of highest order mechanism
+    net = Network(tpm)
+
+    phi = []
+    purview_size = []
+    all_states_tuples = [s for s in all_states(tpm.shape[1])]
+    for state in states:
+        subsystem = Subsystem(net, all_states_tuples[state])
+        cause = subsystem.mic(subsystem.node_indices)
+        phi.append(cause.phi)
+        purview_size.append(len(cause.purview))
+
+    if state_counts is not 1:
+        phi_mean = sum(phi * state_counts / sum(state_counts))
+        purview_size_mean = sum(purview_size * state_counts / sum(state_counts))
+        return phi_mean, purview_size_mean
+
+    else:
+        return phi, purview_size
+
+
+
