@@ -168,5 +168,3 @@ def multi_thread_small_phi(files, num_mechs = 100, max_M_size = 8, save_flag = T
     pool_obj.close()
 
     return answer
-
-
