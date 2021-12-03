@@ -1,9 +1,16 @@
 import numpy as np
+import pandas as pd
+import scipy.io
+import json
+import multiprocessing
 from sklearn.linear_model import LogisticRegression
+from random import sample
 
+from .preparedata import get_prob_matrix
 from ..utils import all_states
 from ..network import Network
 from ..subsystem import Subsystem
+
 
 def binarize_signal(signal):
     # signal: time x voxels
@@ -83,7 +90,7 @@ def small_phi_cause(tpm, states, state_counts = 1):
         phi.append(cause.phi)
         purview_size.append(len(cause.purview))
 
-    if state_counts is not 1:
+    if state_counts != 1:
         phi_mean = sum(phi * state_counts / sum(state_counts))
         purview_size_mean = sum(purview_size * state_counts / sum(state_counts))
         return phi_mean, purview_size_mean
@@ -91,5 +98,75 @@ def small_phi_cause(tpm, states, state_counts = 1):
     else:
         return phi, purview_size
 
+
+def small_phi_across_orders(B_signal, P_cor, num_mechs = 100, max_M_size = 8, save_flag = False, save_path = './', subject_id = ''):
+    
+    phis =[]
+    purview_sizes = []
+
+    for m_size in range(1,max_M_size+1):
+        print('order: ', m_size)
+
+        phi_m = []
+        purview_size_m = []
+
+        Ms = []
+        for n in range(num_mechs):
+            Ms.append(sample(range(len(P_cor)), m_size))
+        
+        for m in Ms:
+            tpm_p_m = logit_cause_tpm(B_signal,P_cor, m, m_size)
+
+            state_list = list_observed_states(B_signal, m)
+            unique_states, counts = np.unique(state_list, return_counts=True)        
+            # max state only
+            ind_most_common = np.argmax(counts)
+            most_common_state = unique_states[ind_most_common]
+            # TODO: all states       
+            av_phi, av_purview_size = small_phi_cause(tpm_p_m, [most_common_state])
+
+            phi_m.extend(av_phi)
+            purview_size_m.extend(av_purview_size)
+
+        phis.append(phi_m)
+        purview_sizes.append(purview_size_m)
+    
+    df_phi = pd.DataFrame(phis).T
+    df_purview = pd.DataFrame(purview_sizes).T
+    # TODO: for large sizes maybe save after every order
+    if save_flag:
+        
+        df_phi.to_json(save_path + subject_id + '_phi_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json')
+        df_purview.to_json(save_path + subject_id + '_purview_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json')
+    
+    else: 
+        return df_phi, df_purview
+
+def small_phi_evaluation_from_path(data_path, num_mechs = 100, max_M_size = 8, save_flag = False, save_path = './' ):
+    cor_mat = scipy.io.loadmat(data_path)
+    S_cor = cor_mat['signal']
+    P_cor, _ = get_prob_matrix(S_cor)
+
+    B_signal = binarize_signal(S_cor)
+    if save_flag:
+        stl = data_path.find('SUBJECT')
+        small_phi_across_orders(B_signal, P_cor, num_mechs = num_mechs, 
+            max_M_size = max_M_size, save_flag = save_flag, save_path = save_path, subject_id=data_path[stl:stl+13])
+    else:
+        return small_phi_across_orders(B_signal, P_cor, num_mechs = num_mechs, max_M_size = max_M_size)
+
+def multi_thread_small_phi(files, num_mechs = 100, max_M_size = 8, save_flag = True, save_path = './'):
+    """Runs small_phi_evaluation and creates a separate thread for each subject
+    """
+    threads = len(files)
+    sp_input = []
+    for file in files:
+        sp_input.append((file, num_mechs, max_M_size, save_flag, save_path))
+
+    pool_obj = multiprocessing.Pool()
+    answer = pool_obj.starmap(small_phi_evaluation_from_path, sp_input)
+    pool_obj.close()
+
+    return answer
 
 
