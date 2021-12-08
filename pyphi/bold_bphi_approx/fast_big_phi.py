@@ -2,6 +2,11 @@ import numpy as np
 import pandas as pd
 import hcp_utils as hcp
 from math import inf
+import scipy.io
+import os
+
+from .preparedata import get_prob_matrix
+from .sim_annealing import bigphi_calc
 
 # Starting from a probability voxel matrix, we find the maximum correlation for each voxel (df_max)
 
@@ -121,3 +126,76 @@ def fast_agglomeration_str(P_cor):
         Rvec = Rvec + P_cor[ID_list[maxind]]
 
     return ind_last
+
+# ---------------------------------------------------------------------------------
+# ROI evaluation wb front back cerebellum
+# ---------------------------------------------------------------------------------
+
+def get_ROI_F_P():
+    this_dir, _ = os.path.split(__file__)
+    F_full = scipy.io.loadmat(os.path.join(this_dir, "parcellations/CorticalArealMask.mat"))['F_full']-1 #Convert to python 0 based indexing
+    P_full = scipy.io.loadmat(os.path.join(this_dir, "parcellations/CorticalArealMask.mat"))['P_full']-1
+
+    mat = scipy.io.loadmat(os.path.join(this_dir, "parcellations/resampled_cortex_ID_3_4mm.mat"))
+    # intersecting vertices across left and right hemispheres, 0-based index?
+    intersect_vert = (
+        np.intersect1d(mat["resample_hemi"][0][0][0], mat["resample_hemi"][1][0][0]) - 1
+        )   
+    D = len(intersect_vert)
+
+    # Need indices in intersect that correspond to Front
+    ROI_F = np.nonzero(np.in1d(intersect_vert, F_full))[0]
+    ROI_P = np.nonzero(np.in1d(intersect_vert, P_full))[0]
+
+    ROI_F = np.append(ROI_F,ROI_F+D, 0)
+    ROI_P = np.append(ROI_P,ROI_P+D, 0)
+
+    return ROI_F, ROI_P
+
+def Phi_ROI_wb_front_back_cerebellum(files_cor, files_cer, num_voxels = 2692, cut_off = 0.001, big_phi_function = []):
+
+    ROI_F, ROI_P = get_ROI_F_P()
+    data = []
+    for c in range(len(files_cor)):
+        print(c, ' out of ', len(files_cor))
+        cor_mat = scipy.io.loadmat(files_cor[c])
+        cer_mat = scipy.io.loadmat(files_cer[c])
+
+        S_cor = cor_mat['signal']
+        S_cer = cer_mat['signal']
+
+        P_cor, _ = get_prob_matrix(S_cor)
+        P_cer, _ = get_prob_matrix(S_cer)
+
+        P_front = P_cor[np.ix_(ROI_F, ROI_F)] 
+        P_post =  P_cor[np.ix_(ROI_P, ROI_P)] 
+               
+        # only 2692 best voxels following Shun's fast agglomeration
+        OROI_cer = fast_agglomeration_str(P_cer)[0:num_voxels]
+        OROI_F = fast_agglomeration_str(P_front)[0:num_voxels]
+        OROI_P = fast_agglomeration_str(P_post)[0:num_voxels]
+
+        P_cer_op = P_cer[np.ix_(OROI_cer, OROI_cer)]
+        P_front_op = P_front[np.ix_(OROI_F, OROI_F)] 
+        P_post_op =  P_post[np.ix_(OROI_P, OROI_P)] 
+
+        if cut_off > 0:
+            # all voxels in region
+            wb, _ = bigphi_calc(P_cor, cut_off)
+
+            ce_op, _ = bigphi_calc(P_cer_op, cut_off)
+            fr_op, _ = bigphi_calc(P_front_op, cut_off)
+            po_op, _ = bigphi_calc(P_post_op, cut_off)
+
+        else:
+            wb = subsystem(P_cor, big_phi_function=big_phi_function)
+
+            ce_op = subsystem(P_cer_op, big_phi_function=big_phi_function)
+            fr_op = subsystem(P_front_op, big_phi_function=big_phi_function)
+            po_op = subsystem(P_post_op, big_phi_function=big_phi_function)
+
+        data.append([wb, ce_op, fr_op, po_op])
+
+    df_subjects = pd.DataFrame(data, columns = ['wb', 'cerr', 'front', 'back']) 
+
+    return df_subjects
