@@ -191,21 +191,3 @@ def max_entropy_distribution(node_indices, number_of_nodes):
     distribution = np.ones(repertoire_shape(node_indices, number_of_nodes))
 
     return distribution / distribution.size
-
-def specified_index(repertoire, partitioned_repertoire):
-    """Return the indices of the state(s) with the maximal AID between the repertoires.
-
-    The index is relative to the entire network (i.e., suitable for indexing
-    into a repertoire).
-
-    Note that there can be ties.
-
-    Returns:
-        np.ndarray: A 2D array where each row is a maximal state.
-    """
-    # TODO(4.0) this is unnecessarily recomputed; should make a
-    # DistanceResult class that can carry auxilliary data, e.g. the maximal
-    # states
-    # TODO(4.0) make configurable
-    density = absolute_information_density(repertoire, partitioned_repertoire)
-    return (density == density.max()).nonzero()

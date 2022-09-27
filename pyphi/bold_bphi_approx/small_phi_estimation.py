@@ -1,3 +1,5 @@
+from posixpath import split
+from joblib.parallel import delayed
 import numpy as np
 import pandas as pd
 import scipy.io
@@ -43,6 +45,18 @@ def list_observed_states(B_signal, M):
     
     return state_list
 
+def tpm_logistic_regression(B_signal, M, purview):
+
+    list_all_states = [s for s in all_states(len(purview))]
+    tpm_p_m = []
+    for m_node in M:
+        lr = LogisticRegression()
+        lr.fit(B_signal[:,purview], B_signal[:,m_node])
+        # get probabilities for m_node to be on for all possible states of purview
+        tpm_p_m.append(lr.predict_proba(list_all_states)[:,1])
+    
+    return np.transpose(tpm_p_m)
+
 def logit_cause_tpm(B_signal, P_cor, M, size_c):
     # based on Shun's logit_coefficient_cause function
     # B_signal: time x voxels
@@ -57,6 +71,8 @@ def logit_cause_tpm(B_signal, P_cor, M, size_c):
         # Purview is max of correlation with mechanism nodes
         for ii in range(size_c):
             max_ind = np.argmax(P_cor_m_p[ii])
+            # LA: or try random to compare
+            #max_ind = sample(range(len(rest_vec)), 1)[0]
             purview.append(rest_vec[max_ind])
 
             P_cor_m_p = np.delete(P_cor_m_p, max_ind, axis = 1)
@@ -83,32 +99,41 @@ def small_phi_cause(tpm, states, state_counts = 1):
 
     phi = []
     purview_size = []
+    p_value = []
     all_states_tuples = [s for s in all_states(tpm.shape[1])]
     for state in states:
         subsystem = Subsystem(net, all_states_tuples[state])
         cause = subsystem.mic(subsystem.node_indices)
         phi.append(cause.phi)
         purview_size.append(len(cause.purview))
+        if cause.repertoire is None:
+            p_value.append(0.)
+        else:
+            p_value.append(cause.repertoire[cause.specified_index])
 
     if state_counts != 1:
         phi_mean = sum(phi * state_counts / sum(state_counts))
         purview_size_mean = sum(purview_size * state_counts / sum(state_counts))
-        return phi_mean, purview_size_mean
+        p_value_mean = sum(p_value * state_counts / sum(state_counts))
+
+        return phi_mean, purview_size_mean, p_value_mean
 
     else:
-        return phi, purview_size
+        return phi, purview_size, p_value
 
 
 def small_phi_across_orders(B_signal, P_cor, num_mechs = 100, max_M_size = 8, save_flag = False, save_path = './', subject_id = ''):
     
     phis =[]
     purview_sizes = []
+    p_values = []
 
     for m_size in range(1,max_M_size+1):
         print('order: ', m_size)
 
         phi_m = []
         purview_size_m = []
+        p_value_m = []
 
         Ms = []
         for n in range(num_mechs):
@@ -123,28 +148,42 @@ def small_phi_across_orders(B_signal, P_cor, num_mechs = 100, max_M_size = 8, sa
             ind_most_common = np.argmax(counts)
             most_common_state = unique_states[ind_most_common]
             # TODO: all states       
-            av_phi, av_purview_size = small_phi_cause(tpm_p_m, [most_common_state])
+            av_phi, av_purview_size, av_p_value = small_phi_cause(tpm_p_m, [most_common_state])
 
             phi_m.extend(av_phi)
             purview_size_m.extend(av_purview_size)
+            p_value_m.extend(av_p_value)
 
         phis.append(phi_m)
         purview_sizes.append(purview_size_m)
+        p_values.append(p_value_m)
+
+        if m_size > 7 and save_flag:
+            df_phi = pd.DataFrame(phis).T
+            df_purview = pd.DataFrame(purview_sizes).T
+            df_p = pd.DataFrame(p_values).T
+
+            df_phi.to_json(save_path + subject_id + '_phi_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json', orient = 'split')
+            df_purview.to_json(save_path + subject_id + '_purview_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json', orient = 'split')
+            df_p.to_json(save_path + subject_id + '_p_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json', orient = 'split')
     
     df_phi = pd.DataFrame(phis).T
     df_purview = pd.DataFrame(purview_sizes).T
+    df_p = pd.DataFrame(p_values).T
     # TODO: for large sizes maybe save after every order
     if save_flag:
         
-        df_phi.to_json(save_path + subject_id + '_phi_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json')
-        df_purview.to_json(save_path + subject_id + '_purview_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json')
+        df_phi.to_json(save_path + subject_id + '_phi_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json', orient = 'split')
+        df_purview.to_json(save_path + subject_id + '_purview_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json', orient = 'split')
+        df_p.to_json(save_path + subject_id + '_p_1to' + str(max_M_size) + 'rep' + str(num_mechs) + '.json', orient = 'split')
     
     else: 
-        return df_phi, df_purview
+        return df_phi, df_purview, df_p
 
 def small_phi_evaluation_from_path(data_path, num_mechs = 100, max_M_size = 8, save_flag = False, save_path = './' ):
     cor_mat = scipy.io.loadmat(data_path)
     S_cor = cor_mat['signal']
+
     P_cor, _ = get_prob_matrix(S_cor)
 
     B_signal = binarize_signal(S_cor)
@@ -155,16 +194,29 @@ def small_phi_evaluation_from_path(data_path, num_mechs = 100, max_M_size = 8, s
     else:
         return small_phi_across_orders(B_signal, P_cor, num_mechs = num_mechs, max_M_size = max_M_size)
 
-def multi_thread_small_phi(files, num_mechs = 100, max_M_size = 8, save_flag = True, save_path = './'):
-    """Runs small_phi_evaluation and creates a separate thread for each subject
-    """
-    threads = len(files)
-    sp_input = []
-    for file in files:
-        sp_input.append((file, num_mechs, max_M_size, save_flag, save_path))
 
-    pool_obj = multiprocessing.Pool()
-    answer = pool_obj.starmap(small_phi_evaluation_from_path, sp_input)
-    pool_obj.close()
+from joblib import Parallel, delayed
 
-    return answer
+def multi_thread_small_phi(files, num_mechs = 100, max_M_size = 8, save_flag = True, save_path = './', parallel_kwargs=None):
+    """Runs small_phi_evaluation and creates a separate thread for each subject"""
+    default_parallel_kwargs = {
+        "verbose": 5,
+        "n_jobs": -1,
+    }
+    parallel_kwargs = {
+        **default_parallel_kwargs,
+        **(parallel_kwargs if parallel_kwargs is not None else dict()),
+    }
+    sp_input = [
+        (file, num_mechs, max_M_size, save_flag, save_path)
+        for file in files
+    ]
+    return Parallel(**parallel_kwargs)(
+        delayed(small_phi_evaluation_from_path)(*args)
+        for args in sp_input
+    )
+    # pool_obj = multiprocessing.Pool()
+    # answer = pool_obj.starmap(small_phi_evaluation_from_path, sp_input)
+    # pool_obj.close()
+
+    # return answer

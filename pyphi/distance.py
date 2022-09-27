@@ -13,10 +13,14 @@ import numpy as np
 from pyemd import emd
 from scipy.spatial.distance import cdist
 from scipy.stats import entropy
+from scipy.special import rel_entr
+
 
 from . import Direction, config, constants, utils, validate
 from .distribution import flatten, marginal_zero
 from .registry import Registry
+
+_LN_OF_2 = np.log(2)
 
 # Load precomputed hamming matrices.
 _NUM_PRECOMPUTED_HAMMING_MATRICES = 10
@@ -325,6 +329,47 @@ def directional_emd(direction, d1, d2):
 
     return round(func(d1, d2), config.PRECISION)
 
+def information_density(p, q):
+    """Return the information density of p relative to q, in base 2.
+    This is also known as the element-wise relative entropy; see
+    :func:`scipy.special.rel_entr`.
+    Args:
+        p (np.ndarray): The first probability distribution.
+        q (np.ndarray): The second probability distribution.
+    Returns:
+        np.ndarray: The information density of ``p`` relative to ``q``.
+    """
+    return rel_entr(p, q) / _LN_OF_2
+
+def absolute_information_density(p, q):
+    """Return the absolute information density function of two distributions.
+    The information density is also known as the element-wise relative
+    entropy; see :func:`scipy.special.rel_entr`.
+    Args:
+        p (np.ndarray): The first probability distribution.
+        q (np.ndarray): The second probability distribution.
+    Returns:
+        np.ndarray: The absolute information density of ``p`` relative to ``q``.
+    """
+    return np.abs(information_density(p, q))
+
+def specified_index(p, q):
+    """Return the indices of the state(s) with the maximal AID between the repertoires.
+
+    The index is relative to the entire network (i.e., suitable for indexing
+    into a repertoire).
+
+    Note that there can be ties.
+
+    Returns:
+        np.ndarray: A 2D array where each row is a maximal state.
+    """
+    # TODO(4.0) this is unnecessarily recomputed; should make a
+    # DistanceResult class that can carry auxilliary data, e.g. the maximal
+    # states
+    # TODO(4.0) make configurable
+    density = absolute_information_density(p, q)
+    return (density == density.max()).nonzero()
 
 def repertoire_distance(direction, r1, r2):
     """Compute the distance between two repertoires for the given direction.

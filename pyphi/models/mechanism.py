@@ -7,6 +7,7 @@
 import numpy as np
 
 from .. import Direction, config, connectivity, distribution, utils
+from ..distance import specified_index
 from ..exceptions import WrongDirectionError
 from . import cmp, fmt
 
@@ -56,6 +57,13 @@ class RepertoireIrreducibilityAnalysis(cmp.Orderable):
         self._repertoire = _repertoire(repertoire)
         self._partitioned_repertoire = _repertoire(partitioned_repertoire)
 
+        if self._partitioned_repertoire is None:
+            self._specified_index = None
+        else:
+            self._specified_index = specified_index(
+                self.repertoire, self.partitioned_repertoire
+            )
+
         # Optional labels - only used to generate nice labeled reprs
         self._node_labels = node_labels
 
@@ -102,6 +110,12 @@ class RepertoireIrreducibilityAnalysis(cmp.Orderable):
         partition.
         """
         return self._partitioned_repertoire
+
+    @property
+    def specified_index(self):
+        """The state(s) with the maximal absolute intrinsic difference
+        between the unpartitioned and partitioned repertoires."""
+        return self._specified_index
 
     @property
     def node_labels(self):
@@ -230,6 +244,12 @@ class MaximallyIrreducibleCauseOrEffect(cmp.Orderable):
         this mechanism.
         """
         return self._ria
+
+    @property
+    def specified_index(self):
+        """The state(s) with the maximal absolute intrinsic difference
+        between the unpartitioned and partitioned repertoires."""
+        return self._ria.specified_index
 
     def __repr__(self):
         return fmt.make_repr(self, ["ria"])
